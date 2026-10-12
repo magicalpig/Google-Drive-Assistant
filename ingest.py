@@ -2,12 +2,14 @@ import io
 import os
 import sys
 
+import anthropic
 from dotenv import load_dotenv
 from pinecone import Pinecone, ServerlessSpec
 from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
 
 from drive import get_drive, get_sheets, list_my_files
+from sheets import sheet_passages
 
 INDEX_NAME = "chatbot"
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"  # small (~130 MB), makes 384 numbers per passage
@@ -15,7 +17,8 @@ CHUNK_SIZE = 1000  # characters per passage, roughly a few paragraphs
 
 # Raise this when the way passages are made changes, so the next run stores every file again.
 # 2: passages start with the file name; Sheets passages also have the tab name and column headings.
-PASSAGE_FORMAT = 2
+# 3: Sheets formulas are grouped and named, with named ranges, named functions and descriptions.
+PASSAGE_FORMAT = 3
 
 GOOGLE_DOC = "application/vnd.google-apps.document"
 GOOGLE_SHEET = "application/vnd.google-apps.spreadsheet"
@@ -23,69 +26,20 @@ PDF = "application/pdf"
 TEXT = "text/plain"
 
 
-def column_letter(n):
-    """0 -> A, 25 -> Z, 26 -> AA."""
-    letters = ""
-    n += 1
-    while n:
-        n, remainder = divmod(n - 1, 26)
-        letters = chr(65 + remainder) + letters
-    return letters
+def clean(text):
+    """Replace broken characters (found in some PDFs and Sheets) that crash the embedding model with "?"."""
+    return text.encode("utf-8", errors="replace").decode("utf-8")
 
 
-def get_sheet_passages(sheets, file):
-    """Turn a Google Sheet into passages.
-
-    The first passage lists the file's tabs and each tab's column headings. Every other passage
-    starts with the file name, tab name and column headings, then lists cells with their formulas,
-    like 'C5 (Amount): =SUM(C2:C4) -> 1,250'.
-    """
-    result = sheets.spreadsheets().get(
-        spreadsheetId=file["id"],
-        includeGridData=True,
-        fields="sheets(properties.title,data.rowData.values(userEnteredValue,formattedValue))",
-    ).execute()
-    summary = [f"File: {file['name']} (Google Sheet). Its tabs:"]
-    passages = []
-    for sheet in result.get("sheets", []):
-        title = sheet["properties"]["title"]
-        rows = [row.get("values", []) for grid in sheet.get("data", []) for row in grid.get("rowData", [])]
-        # The first row with anything in it is treated as the column headings.
-        heading_row = next((i for i, row in enumerate(rows) if any(c.get("formattedValue") for c in row)), None)
-        if heading_row is None:
-            summary.append(f"- {title}: empty")
-            continue
-        headings = {
-            col: c["formattedValue"].strip()
-            for col, c in enumerate(rows[heading_row])
-            if c.get("formattedValue", "").strip()
-        }
-        heading_list = ", ".join(f"{column_letter(col)} = {name}" for col, name in headings.items())
-        summary.append(f"- {title}: {len(rows)} rows. Columns: {heading_list}")
-
-        lines = []
-        for row_num, row in enumerate(rows, 1):
-            for col, cell in enumerate(row):
-                shown = cell.get("formattedValue")
-                formula = cell.get("userEnteredValue", {}).get("formulaValue")
-                if not (formula or shown):
-                    continue
-                name = f"{column_letter(col)}{row_num}"
-                if col in headings and row_num - 1 != heading_row:
-                    name += f" ({headings[col]})"
-                lines.append(f"{name}: {formula} -> {shown}" if formula else f"{name}: {shown}")
-        header = f"File: {file['name']} | Tab: {title} | Columns: {heading_list[:300]}\n"
-        passages += [header + passage for passage in split_text("\n".join(lines))]
-    return ["\n".join(summary)] + passages
-
-
-def get_passages(drive, sheets, file):
+def get_passages(drive, sheets, client, file):
     """Download a Google Doc, Google Sheet, PDF, or .txt file from Drive and split it into passages.
 
-    Every passage starts with the file name, so questions can match on the name too.
+    Returns (text to embed, text Claude reads) pairs. For everything except Sheets, the two are
+    the same. Every passage starts with the file name, so questions can match on the name too.
     """
     if file["mimeType"] == GOOGLE_SHEET:
-        return get_sheet_passages(sheets, file)
+        passages = sheet_passages(drive, sheets, client, file)
+        return [(clean(embed), clean(read)) for embed, read in passages]
     if file["mimeType"] == GOOGLE_DOC:
         data = drive.files().export(fileId=file["id"], mimeType="text/plain").execute()
         text = data.decode("utf-8", errors="replace")
@@ -96,13 +50,13 @@ def get_passages(drive, sheets, file):
         else:
             reader = PdfReader(io.BytesIO(data))
             text = "\n\n".join(page.extract_text() or "" for page in reader.pages)
-    return [f"File: {file['name']}\n{passage}" for passage in split_text(text)]
+    passages = [f"File: {file['name']}\n{passage}" for passage in split_text(text)]
+    return [(passage, passage) for passage in passages]
 
 
 def split_text(text):
     """Split text into passages of about CHUNK_SIZE characters, keeping paragraphs together."""
-    # Some PDFs contain broken characters that crash the embedding model; replace them with "?".
-    text = text.encode("utf-8", errors="replace").decode("utf-8")
+    text = clean(text)
     chunks = []
     current = ""
     for paragraph in text.split("\n"):
@@ -152,6 +106,7 @@ def main():
     load_dotenv()
     drive = get_drive()
     sheets = get_sheets()
+    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])  # describes formulas in a few Sheets
     model = SentenceTransformer(EMBEDDING_MODEL)
     pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
     index = get_index(pc, model.get_embedding_dimension())
@@ -173,11 +128,11 @@ def main():
             # The file changed, or its passages were made the old way: remove them, then store it again.
             index.delete(filter={"file_id": file["id"]})
         try:
-            chunks = get_passages(drive, sheets, file)
-            if not chunks:
+            passages = get_passages(drive, sheets, client, file)
+            if not passages:
                 print(f"[{n}/{len(files)}] no text  {file['name']}")
                 continue
-            vectors = model.encode(chunks, normalize_embeddings=True)
+            vectors = model.encode([embed for embed, _ in passages], normalize_embeddings=True)
         except Exception as e:
             print(f"[{n}/{len(files)}] SKIPPED {file['name']}: {e}")
             continue
@@ -191,14 +146,15 @@ def main():
                     "file_id": file["id"],
                     "modified": file["modifiedTime"],
                     "format": PASSAGE_FORMAT,
-                    "text": chunk,
+                    # Pinecone allows 40 KB of these details per passage; long formulas could pass that.
+                    "text": read[:30000],
                 },
             }
-            for i, (chunk, vector) in enumerate(zip(chunks, vectors))
+            for i, ((_, read), vector) in enumerate(zip(passages, vectors))
         ]
         for start in range(0, len(records), 100):
             index.upsert(vectors=records[start:start + 100])
-        print(f"[{n}/{len(files)}] {len(chunks):4} passages  {file['name']}")
+        print(f"[{n}/{len(files)}] {len(passages):4} passages  {file['name']}")
 
 
 if __name__ == "__main__":

@@ -36,7 +36,7 @@ python chat.py
 
 Type a question and press Enter. The answer prints as Claude writes it. Press Enter on an empty line to quit.
 
-Each question costs about $0.0004 in Anthropic credits (Claude Haiku 5.5).
+Each question costs about $0.0004–0.001 in Anthropic credits (Claude Haiku 5.5).
 
 ## How a question is answered
 
@@ -46,18 +46,35 @@ Each question costs about $0.0004 in Anthropic credits (Claude Haiku 5.5).
 
 ## What's stored in Pinecone
 
-Everything is in one Pinecone index named `chatbot`. Your files are split into passages of about 1,000 characters. Every passage starts with its file name, so a question can match on the name as well as the contents.
+Everything is in one Pinecone index named `chatbot`. Docs, PDFs and .txt files are split into passages of about 1,000 characters. Every passage starts with its file name, so a question can match on the name as well as the contents.
 
-Google Sheets get extra help:
+### Google Sheets
 
-- One summary passage per spreadsheet lists its tabs, how many rows each has, and each tab's column headings.
-- Every other passage starts with the file name, tab name and column headings.
-- Each cell is labeled with its column heading, for example `F3 (Hours worked): =D3/65 -> 5.50`. The first row with anything in it is treated as the headings.
+Spreadsheets are handled by `sheets.py`. Their passages are up to about 2,000 characters, which is as much as the embedding model reads. Each spreadsheet gets:
+
+- **An overview passage:** its tabs, how many rows each has, and each tab's column headings. The headings row is the one among the first 5 rows with the most text cells.
+- **Named range passages:** each name, the cell it points to, and that cell's value, for example `CURRENT_YEAR = Constants!B1 -> 2026`.
+- **One passage per named function:** its full definition. Google's Sheets API doesn't return named functions, so they're read from Google's Excel export of the file.
+- **Cell passages:** each starts with the file name, tab name and column headings. Each cell is labeled with its column heading, for example `D3 (Amount): $357.50`.
+
+**Repeated formulas are written once.** Formulas that are the same apart from shifted cell references, like `=D2/65` in F2 and `=D3/65` in F3, count as one formula. This works the way copying a formula works: references without `$` shift, references with `$` stay fixed. A formula used in several cells is named, like `[Formula 2]`, and written out once at the top of each passage that uses it. Its cells say `F3 (Hours worked): [Formula 2] -> 5.50`. A formula used in only one cell is written in that cell's line.
+
+**Formula descriptions (costs credits):** for spreadsheets listed in `DESCRIBE_FORMULAS_IN` in `sheets.py`, ingest asks Claude (`DESCRIBE_MODEL`, now Opus 5.5) to write a plain-English description of each formula and named function. For example: "Hours worked = this row's Amount ÷ 65." It makes one request per spreadsheet and prints what it cost. The HSA Transaction report cost about $0.06. The listed spreadsheets are:
+
+- Payroll 2026
+- Business Expenses 2026
+- HSA Transaction report 2026
+
+For those spreadsheets, the descriptions are what get embedded, so questions in everyday words can find formulas. For other spreadsheets, the first 150 characters of each raw formula are embedded instead. Either way, Claude reads the full raw formula when answering.
+
+A spreadsheet is only described again when it changes in Drive, or when `PASSAGE_FORMAT` is raised.
+
+### What each record holds
 
 Each passage is stored as one record with:
 
 - its vector (the 384 numbers from the embedding model)
-- the passage text
+- the passage text that Claude reads. For spreadsheets, this can differ from the text that was embedded.
 - the file name and Google Drive file ID
 - the file's last-modified time in Drive
 - the passage format number (`PASSAGE_FORMAT` in `ingest.py`)
@@ -93,7 +110,7 @@ Only files that meet all of these:
 - They aren't in the trash.
 - They are one of these types:
   - **Google Docs:** the text
-  - **Google Sheets:** every non-empty cell in every tab, with its formula and the value it shows, for example `F3 (Hours worked): =D3/65 -> 5.50`
+  - **Google Sheets:** every non-empty cell in every tab, with its formula and the value it shows, plus named ranges and named functions. Apps Script functions aren't read.
   - **PDFs:** the text only. Scanned PDFs are pictures of pages and have no text, so they're skipped. One PDF can't be read because `pypdf` fails on a picture inside it.
   - **.txt files**
 
@@ -147,7 +164,8 @@ Claude writes the answers. The key in `.env` must be created inside a workspace 
 
 - **Billing:** you buy credits in advance, and each question uses some. The Claude Pro plan doesn't cover this. API credits are billed separately.
 - **Model:** Claude Haiku 5.5, set by `CLAUDE_MODEL` in `chat.py`. It costs $0.10 per million tokens sent and $0.50 per million tokens received. A token is about three-quarters of a word.
-- **Per question:** about $0.0004, so $1 covers about 2,500 questions.
+- **Per question:** about $0.0004–0.001, depending on how many long spreadsheet passages are found. $1 covers 1,000 or more questions.
+- **Ingest:** describing formulas in the spreadsheets listed in `sheets.py` uses Opus 5.5 at $4 per million tokens sent and $20 per million received. That's a few cents to a few tenths of a dollar per spreadsheet, and only when the spreadsheet is new or has changed. Ingest prints each cost.
 - **Spending limit:** set a monthly limit in the Console under Plans & Billing.
 - **When credits run out:** answers fail with "Your credit balance is too low."
 

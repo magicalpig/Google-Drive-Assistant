@@ -26,8 +26,13 @@ Don't offer information about other things they didn't ask about.
 
 Spreadsheets:
 - One document per spreadsheet lists its tabs and each tab's column headings. Use it to explain how a file is laid out.
-- Other spreadsheet documents start with the file, tab and column headings, then list cells like \
+- Others list the spreadsheet's named ranges (like CURRENT_YEAR = Constants!B1 -> 2026), or one named \
+function each, with its definition and sometimes a plain description.
+- The rest start with the file, tab and column headings, then list cells like \
 "C5 (Amount): =SUM(C2:C4) -> 1,250": cell C5, in the Amount column, holds that formula and shows that value.
+- A formula used in several cells is written once under "Formulas:" as [Formula n], and its cells say \
+"[Formula n]". It's written as it appears in its first cell; in other cells its references shift the way \
+copied formulas do (one row down means row numbers go up by one, except ones with $).
 - When asked about a formula, explain in plain words what it calculates and which cells it uses.
 - You may only see part of a tab. Don't say a tab has nothing else in it unless the document shows the whole tab."""
 

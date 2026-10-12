@@ -13,7 +13,7 @@ from drive import get_drive, get_sheets, list_my_files
 from sheets import sheet_passages
 
 INDEX_NAME = "chatbot"
-EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"  # small (~130 MB), makes 384 numbers per passage
+EMBEDDING_MODEL = "BAAI/bge-base-en-v1.5"  # ~440 MB, makes 768 numbers per passage
 CHUNK_SIZE = 1000  # characters per passage, roughly a few paragraphs
 
 # Raise this when the way passages are made changes, so the next run stores every file again.
@@ -97,7 +97,14 @@ def split_text(text):
 
 
 def get_index(pc, dimension):
-    """Return the Pinecone index, creating it the first time."""
+    """Return the Pinecone index, creating it the first time.
+
+    If the index was made for a different embedding model (vectors of a different size), it's
+    deleted and made again, and every file is stored again.
+    """
+    if pc.has_index(INDEX_NAME) and pc.describe_index(INDEX_NAME).dimension != dimension:
+        print(f"The embedding model changed: deleting the Pinecone index '{INDEX_NAME}' to make it again")
+        pc.delete_index(INDEX_NAME)
     if not pc.has_index(INDEX_NAME):
         pc.create_index(
             name=INDEX_NAME,

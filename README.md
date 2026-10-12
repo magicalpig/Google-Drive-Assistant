@@ -92,3 +92,63 @@ Other limits:
 
 - The embedding model is built for English. Questions about files in other languages, such as Portuguese, will find poor matches.
 - Spreadsheet cells are stored as plain lists like `G8: =137.26+12.23 -> $149.49`, so questions in everyday words may not find the right cells.
+
+## Services this project uses
+
+Prices and limits below are as of October 2026. Check each service's site for changes.
+
+### Google Cloud: access to your Drive
+
+A Google Cloud project named `chatbot` (console.cloud.google.com) lets the scripts read your Drive.
+
+- **APIs turned on:** Google Drive API (lists files and downloads Docs, PDFs and .txt files) and Google Sheets API (reads each cell's formula and value).
+- **Sign-in screen** (Google Auth Platform): set to External and Testing. Only accounts listed as test users can sign in, and your Gmail is the only one.
+- **OAuth client:** a Desktop app. Its file is `credentials.json`.
+- **Permission asked for:** read-only access to Drive (`drive.readonly`). The scripts can't change or delete anything.
+- **Cost:** free.
+- **Limit:** while the app is in Testing, Google ends the saved sign-in after 7 days. When that happens, the scripts fail with an `invalid_grant` error. Delete `token.json` and run `python drive.py` to sign in again. Then copy the new `token.json` to any codespace that needs it.
+
+### GitHub: the code and the codespace
+
+The code is in the private repository `magicalpig/chatbot` on GitHub, which is free.
+
+A **codespace** is a computer in the cloud with a copy of this repository on it. You open it in your browser or in VS Code. It's used to run `ingest.py` without loading your own PC.
+
+How it's connected to the repository:
+
+- It was created from the repository, so it started with a copy of the code.
+- `.devcontainer/devcontainer.json` tells GitHub to set it up with Python 3.12.
+- It doesn't update by itself. After pushing changes from the desktop or laptop, run `git pull` in the codespace to get them. If `requirements.txt` changed, also run `pip install -r requirements.txt`.
+- `.env`, `credentials.json` and `token.json` aren't on GitHub, so they were copied into the codespace by hand.
+- Installed libraries, the downloaded embedding model and the copied files stay in the codespace between uses. They are lost only if the codespace is deleted.
+
+Limits on a free personal account:
+
+- **Time:** 120 core-hours a month. The codespace has 2 cores, so that's 60 hours of running time. Time counts only while it's running.
+- **Storage:** 15 GB a month.
+- **Stopping:** it stops by itself after 30 minutes without use. You can also stop it at github.com/codespaces.
+- **Beyond the free allowance:** about $0.18 an hour for 2 cores, but only if you add a payment method. Without one, it just stops working until next month.
+- **Checking usage:** github.com/settings/billing/usage. The amount shown there before the "discount" line is what it would cost without the free allowance.
+
+### Anthropic: Claude
+
+Claude writes the answers. The key in `.env` must be created inside a workspace in the Anthropic Console (console.anthropic.com). A key assigned to the whole organization doesn't work with this code.
+
+- **Billing:** you buy credits in advance, and each question uses some. The Claude Pro plan doesn't cover this. API credits are billed separately.
+- **Model:** Claude Haiku 5.5, set by `CLAUDE_MODEL` in `chat.py`. It costs $0.10 per million tokens sent and $0.50 per million tokens received. A token is about three-quarters of a word.
+- **Per question:** about $0.0004, so $1 covers about 2,500 questions.
+- **Spending limit:** set a monthly limit in the Console under Plans & Billing.
+- **When credits run out:** answers fail with "Your credit balance is too low."
+
+### Pinecone: the stored passages
+
+Pinecone (pinecone.io) stores the passages and their vectors. It's on the free Starter plan.
+
+- **Storage:** 2 GB. About 8,300 passages use a small part of it.
+- **Indexes:** up to 5. This project uses 1, in AWS us-east-1, the only region on the free plan.
+- **Monthly usage:** up to 2 million write units (storing, updating and deleting) and 1 million read units (searches and lookups). If either runs out, Pinecone refuses requests until the next month.
+- **Cost:** free. Free indexes aren't deleted for lack of use.
+
+### Hugging Face: the embedding model
+
+The embedding model `BAAI/bge-small-en-v1.5` is downloaded from Hugging Face the first time a script needs it, then kept on that computer. It's free and doesn't need an account. You can ignore the "unauthenticated requests to the HF Hub" warning.

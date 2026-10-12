@@ -29,7 +29,7 @@ def find_passages(index, model, question):
 
 
 def ask_claude(client, question, passages):
-    """Send the question and passages to Claude and print the answer as it arrives."""
+    """Send the question and passages to Claude, giving back the answer piece by piece as it arrives."""
     passage_text = "\n\n".join(
         f'<passage file="{p["file_name"]}">\n{p["text"]}\n</passage>' for p in passages
     )
@@ -40,11 +40,9 @@ def ask_claude(client, question, passages):
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": f"{passage_text}\n\nQuestion: {question}"}],
     ) as stream:
-        for text in stream.text_stream:
-            print(text, end="", flush=True)
+        yield from stream.text_stream
         if stream.get_final_message().stop_reason == "refusal":
-            print("(Claude declined to answer this question.)", end="")
-    print()
+            yield "(Claude declined to answer this question.)"
 
 
 def main():
@@ -59,7 +57,9 @@ def main():
         if not question:
             return
         try:
-            ask_claude(client, question, find_passages(index, model, question))
+            for text in ask_claude(client, question, find_passages(index, model, question)):
+                print(text, end="", flush=True)
+            print()
         except anthropic.APIError as e:
             print(f"Error from Claude: {e}")
 

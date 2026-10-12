@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drive Chatbot</title>
+<style>
+  :root { --bg: #fafaf9; --text: #1c1917; --muted: #78716c; --line: #d6d3d1; --accent: #2563eb; --card: #ffffff; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1c1917; --text: #f5f5f4; --muted: #a8a29e; --line: #44403c; --accent: #60a5fa; --card: #292524; }
+  }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px; }
+  h1 { font-size: 22px; margin: 0 0 16px; }
+  form { display: flex; gap: 8px; }
+  textarea { flex: 1; resize: vertical; min-height: 48px; padding: 10px 12px; font: inherit; color: inherit;
+             background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+  button { padding: 0 18px; font: inherit; color: #fff; background: var(--accent); border: 0; border-radius: 8px; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .hint { color: var(--muted); font-size: 13px; margin: 6px 0 24px; }
+  .entry { margin-bottom: 24px; }
+  .question { font-weight: 600; margin-bottom: 6px; }
+  .answer { white-space: pre-wrap; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Ask about your Drive files</h1>
+  <form id="form">
+    <textarea id="question" placeholder="Type a question…" required></textarea>
+    <button id="send">Ask</button>
+  </form>
+  <div class="hint">Enter to send, Shift+Enter for a new line.</div>
+  <div id="history"></div>
+</main>
+<script>
+  const form = document.getElementById("form");
+  const box = document.getElementById("question");
+  const send = document.getElementById("send");
+  const history = document.getElementById("history");
+
+  box.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
+  });
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const question = box.value.trim();
+    if (!question) return;
+    box.value = "";
+    send.disabled = true;
+
+    const entry = document.createElement("div");
+    entry.className = "entry";
+    entry.innerHTML = '<div class="question"></div><div class="answer">…</div>';
+    entry.querySelector(".question").textContent = question;
+    const answer = entry.querySelector(".answer");
+    history.prepend(entry);
+
+    try {
+      const response = await fetch("/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question }),
+      });
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      answer.textContent = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        answer.textContent += decoder.decode(value, { stream: true });
+      }
+    } catch (err) {
+      answer.textContent = "Couldn't reach the chatbot. Is app.py still running?";
+    }
+    send.disabled = false;
+    box.focus();
+  });
+</script>
+</body>
+</html>

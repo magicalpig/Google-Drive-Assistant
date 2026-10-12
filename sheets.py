@@ -22,6 +22,8 @@ import xml.etree.ElementTree as ET
 DESCRIBE_FORMULAS_IN = ["Payroll 2026", "Business Expenses 2026", "HSA Transaction report 2026"]
 DESCRIBE_MODEL = "claude-opus-5-5"
 DESCRIBE_PRICES = (4.00, 20.00)  # dollars per million tokens sent and received, for DESCRIBE_MODEL
+# Descriptions already written, so later runs only pay for new or changed formulas.
+SAVED_DESCRIPTIONS = "formula_descriptions.json"
 
 # Characters per passage. The embedding model reads about the first 2,000 characters of a passage.
 PASSAGE_CHARS = 2000
@@ -208,9 +210,10 @@ def range_text(grid_range, tab_titles):
     return f"{title}!{start}:{end}"
 
 
-def describe(client, file_name, tabs, named_ranges, functions, groups):
-    """Ask Claude to describe each named function and formula group.
+def describe(client, file_name, tabs, named_ranges, functions, functions_to_describe, groups):
+    """Ask Claude to describe the named functions in `functions_to_describe` and each formula group.
 
+    All of `functions` are sent so Claude can understand formulas that use them.
     Returns ({function name: description}, {formula number: description}).
     """
     lines = [f"Spreadsheet: {file_name}", "", "Tabs and column headings:"]
@@ -220,7 +223,11 @@ def describe(client, file_name, tabs, named_ranges, functions, groups):
     if functions:
         lines += ["", "Named functions:"]
         lines += [f'<function name="{name}">\n{definition}\n</function>' for name, definition in functions.items()]
-    lines += ["", "Formula groups (each shown as written in its first cell):"]
+    if functions_to_describe:
+        lines += ["", "Describe these named functions: " + ", ".join(functions_to_describe)]
+    else:
+        lines += ["", "Don't describe any named functions this time; they're only here for reference."]
+    lines += ["", "Formula groups to describe (each shown as written in its first cell):"]
     for g in groups:
         where = f"\nWhere: {'; '.join(g['labels'])}" if g["labels"] else ""
         lines.append(f'<formula number="{g["number"]}" tab="{g["tab"]}" column="{g["column"]}" '
@@ -265,6 +272,47 @@ def describe(client, file_name, tabs, named_ranges, functions, groups):
     result = json.loads(next(block.text for block in message.content if block.type == "text"))
     return ({f["name"]: f["description"] for f in result["functions"]},
             {f["number"]: f["description"] for f in result["formulas"]})
+
+
+def saved_or_new_descriptions(client, file, name, tabs, named_ranges, functions, groups):
+    """Descriptions for a spreadsheet's named functions and formulas.
+
+    Descriptions are saved in SAVED_DESCRIPTIONS, so Claude is only asked about named functions
+    and formulas that are new or changed since the last run. A formula counts as unchanged if it's
+    the same apart from shifted references, in the same tab, with the same labels.
+
+    Returns ({function name: description}, {formula group number: description}).
+    """
+    try:
+        with open(SAVED_DESCRIPTIONS, encoding="utf-8") as f:
+            saved = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        saved = {}
+
+    function_key = {fn: f"{file['id']}|function|{fn}|{definition}" for fn, definition in functions.items()}
+    formula_key = {
+        g["number"]: f"{file['id']}|formula|{tab}|{relative}|{'; '.join(g['labels'])}"
+        for (tab, relative), g in groups.items()
+    }
+    new_functions = [fn for fn, key in function_key.items() if key not in saved]
+    new_groups = [g for g in groups.values() if formula_key[g["number"]] not in saved]
+
+    if new_functions or new_groups:
+        print(f"    asking Claude about {len(new_functions)} named functions and {len(new_groups)} formulas "
+              f"({len(functions) - len(new_functions) + len(groups) - len(new_groups)} already described)")
+        described_functions, described_formulas = describe(
+            client, name, tabs, named_ranges, functions, new_functions, new_groups)
+        for fn, description in described_functions.items():
+            if fn in function_key:
+                saved[function_key[fn]] = description
+        for number, description in described_formulas.items():
+            if number in formula_key:
+                saved[formula_key[number]] = description
+        with open(SAVED_DESCRIPTIONS, "w", encoding="utf-8") as f:
+            json.dump(saved, f, indent=1)
+
+    return ({fn: saved[key] for fn, key in function_key.items() if key in saved},
+            {number: saved[key] for number, key in formula_key.items() if key in saved})
 
 
 def pack(lines, limit=PASSAGE_CHARS):
@@ -364,8 +412,8 @@ def sheet_passages(drive, sheets, client, file):
 
     function_descriptions, formula_descriptions = {}, {}
     if file["name"] in DESCRIBE_FORMULAS_IN and client and (groups or functions):
-        function_descriptions, formula_descriptions = describe(
-            client, name, tabs, named_ranges, functions, list(groups.values()))
+        function_descriptions, formula_descriptions = saved_or_new_descriptions(
+            client, file, name, tabs, named_ranges, functions, groups)
 
     passages = []
 

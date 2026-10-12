@@ -42,16 +42,25 @@ Each question costs about $0.0004 in Anthropic credits (Claude Haiku 5.5).
 
 1. **Your question is turned into numbers.** The embedding model (`BAAI/bge-small-en-v1.5`) turns the question into a list of 384 numbers called a vector. Text with similar meaning gets similar numbers, even when the words differ. The model file is downloaded once (about 130 MB), and the `sentence-transformers` library uses it on your own computer.
 2. **Pinecone finds the closest passages.** Pinecone compares the question's vector with the stored passage vectors and returns the 8 closest passages.
-3. **Claude writes the answer.** The question and those 8 passages are sent to Claude, which answers using only the passages and lists the files it used. If the passages don't contain the answer, it says so.
+3. **Claude writes the answer.** The question and those 8 passages are sent to Claude, which answers using only the passages and lists the files it used. If the passages don't contain the answer, it says it couldn't find it and stops. Its instructions are `SYSTEM_PROMPT` in `chat.py`.
 
 ## What's stored in Pinecone
 
-Everything is in one Pinecone index named `chatbot`. Your files are split into passages of about 1,000 characters. Each passage is stored as one record with:
+Everything is in one Pinecone index named `chatbot`. Your files are split into passages of about 1,000 characters. Every passage starts with its file name, so a question can match on the name as well as the contents.
+
+Google Sheets get extra help:
+
+- One summary passage per spreadsheet lists its tabs, how many rows each has, and each tab's column headings.
+- Every other passage starts with the file name, tab name and column headings.
+- Each cell is labeled with its column heading, for example `F3 (Hours worked): =D3/65 -> 5.50`. The first row with anything in it is treated as the headings.
+
+Each passage is stored as one record with:
 
 - its vector (the 384 numbers from the embedding model)
 - the passage text
 - the file name and Google Drive file ID
 - the file's last-modified time in Drive
+- the passage format number (`PASSAGE_FORMAT` in `ingest.py`)
 
 Each record's ID is the Drive file ID plus the passage number, for example `1bOQuT6...-0`, `1bOQuT6...-1`.
 
@@ -66,9 +75,11 @@ python ingest.py
 For each file, it compares the file's last-modified time in Drive with the time stored in Pinecone:
 
 - **New file:** reads, embeds and stores it.
-- **Same time:** skips it.
-- **Different time:** deletes the file's old passages and stores it again.
+- **Same time and same passage format:** skips it.
+- **Different time or older passage format:** deletes the file's old passages and stores it again.
 - **No longer in Drive:** deletes its passages.
+
+When the code that makes passages changes, raise `PASSAGE_FORMAT` in `ingest.py`. The next run then stores every file again in the new format.
 
 Embedding uses the computer's processor heavily. On an old PC, run it in the codespace instead.
 
@@ -82,7 +93,7 @@ Only files that meet all of these:
 - They aren't in the trash.
 - They are one of these types:
   - **Google Docs:** the text
-  - **Google Sheets:** every non-empty cell, with its formula and the value it shows, for example `C5: =SUM(C2:C4) -> 1,250`
+  - **Google Sheets:** every non-empty cell in every tab, with its formula and the value it shows, for example `F3 (Hours worked): =D3/65 -> 5.50`
   - **PDFs:** the text only. Scanned PDFs are pictures of pages and have no text, so they're skipped. One PDF can't be read because `pypdf` fails on a picture inside it.
   - **.txt files**
 
@@ -91,7 +102,7 @@ Not included: Word documents, Excel files (.xlsx and .xls), CSV files, audio, im
 Other limits:
 
 - The embedding model is built for English. Questions about files in other languages, such as Portuguese, will find poor matches.
-- Spreadsheet cells are stored as plain lists like `G8: =137.26+12.23 -> $149.49`, so questions in everyday words may not find the right cells.
+- Claude sees only the 8 passages that best match each question, never a whole file. For a large spreadsheet, that's only part of it.
 
 ## Services this project uses
 

@@ -13,6 +13,10 @@ INDEX_NAME = "chatbot"
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"  # small (~130 MB), makes 384 numbers per passage
 CHUNK_SIZE = 1000  # characters per passage, roughly a few paragraphs
 
+# Raise this when the way passages are made changes, so the next run stores every file again.
+# 2: passages start with the file name; Sheets passages also have the tab name and column headings.
+PASSAGE_FORMAT = 2
+
 GOOGLE_DOC = "application/vnd.google-apps.document"
 GOOGLE_SHEET = "application/vnd.google-apps.spreadsheet"
 PDF = "application/pdf"
@@ -29,40 +33,70 @@ def column_letter(n):
     return letters
 
 
-def get_sheet_text(sheets, file_id):
-    """Return every non-empty cell of a Google Sheet, with formulas, like 'C5: =SUM(C2:C4) -> 1,250'."""
+def get_sheet_passages(sheets, file):
+    """Turn a Google Sheet into passages.
+
+    The first passage lists the file's tabs and each tab's column headings. Every other passage
+    starts with the file name, tab name and column headings, then lists cells with their formulas,
+    like 'C5 (Amount): =SUM(C2:C4) -> 1,250'.
+    """
     result = sheets.spreadsheets().get(
-        spreadsheetId=file_id,
+        spreadsheetId=file["id"],
         includeGridData=True,
         fields="sheets(properties.title,data.rowData.values(userEnteredValue,formattedValue))",
     ).execute()
-    lines = []
+    summary = [f"File: {file['name']} (Google Sheet). Its tabs:"]
+    passages = []
     for sheet in result.get("sheets", []):
-        lines.append(f"Sheet: {sheet['properties']['title']}")
-        for grid in sheet.get("data", []):
-            for row_num, row in enumerate(grid.get("rowData", []), 1):
-                for col_num, cell in enumerate(row.get("values", [])):
-                    shown = cell.get("formattedValue")
-                    formula = cell.get("userEnteredValue", {}).get("formulaValue")
-                    if formula:
-                        lines.append(f"{column_letter(col_num)}{row_num}: {formula} -> {shown}")
-                    elif shown:
-                        lines.append(f"{column_letter(col_num)}{row_num}: {shown}")
-    return "\n".join(lines)
+        title = sheet["properties"]["title"]
+        rows = [row.get("values", []) for grid in sheet.get("data", []) for row in grid.get("rowData", [])]
+        # The first row with anything in it is treated as the column headings.
+        heading_row = next((i for i, row in enumerate(rows) if any(c.get("formattedValue") for c in row)), None)
+        if heading_row is None:
+            summary.append(f"- {title}: empty")
+            continue
+        headings = {
+            col: c["formattedValue"].strip()
+            for col, c in enumerate(rows[heading_row])
+            if c.get("formattedValue", "").strip()
+        }
+        heading_list = ", ".join(f"{column_letter(col)} = {name}" for col, name in headings.items())
+        summary.append(f"- {title}: {len(rows)} rows. Columns: {heading_list}")
+
+        lines = []
+        for row_num, row in enumerate(rows, 1):
+            for col, cell in enumerate(row):
+                shown = cell.get("formattedValue")
+                formula = cell.get("userEnteredValue", {}).get("formulaValue")
+                if not (formula or shown):
+                    continue
+                name = f"{column_letter(col)}{row_num}"
+                if col in headings and row_num - 1 != heading_row:
+                    name += f" ({headings[col]})"
+                lines.append(f"{name}: {formula} -> {shown}" if formula else f"{name}: {shown}")
+        header = f"File: {file['name']} | Tab: {title} | Columns: {heading_list[:300]}\n"
+        passages += [header + passage for passage in split_text("\n".join(lines))]
+    return ["\n".join(summary)] + passages
 
 
-def get_text(drive, sheets, file):
-    """Download a Google Doc, Google Sheet, PDF, or .txt file from Drive and return its text."""
+def get_passages(drive, sheets, file):
+    """Download a Google Doc, Google Sheet, PDF, or .txt file from Drive and split it into passages.
+
+    Every passage starts with the file name, so questions can match on the name too.
+    """
     if file["mimeType"] == GOOGLE_SHEET:
-        return get_sheet_text(sheets, file["id"])
+        return get_sheet_passages(sheets, file)
     if file["mimeType"] == GOOGLE_DOC:
         data = drive.files().export(fileId=file["id"], mimeType="text/plain").execute()
-        return data.decode("utf-8", errors="replace")
-    data = drive.files().get_media(fileId=file["id"]).execute()
-    if file["mimeType"] == TEXT:
-        return data.decode("utf-8", errors="replace")
-    reader = PdfReader(io.BytesIO(data))
-    return "\n\n".join(page.extract_text() or "" for page in reader.pages)
+        text = data.decode("utf-8", errors="replace")
+    else:
+        data = drive.files().get_media(fileId=file["id"]).execute()
+        if file["mimeType"] == TEXT:
+            text = data.decode("utf-8", errors="replace")
+        else:
+            reader = PdfReader(io.BytesIO(data))
+            text = "\n\n".join(page.extract_text() or "" for page in reader.pages)
+    return [f"File: {file['name']}\n{passage}" for passage in split_text(text)]
 
 
 def split_text(text):
@@ -132,20 +166,14 @@ def main():
     for n, file in enumerate(files, 1):
         first = index.fetch(ids=[f"{file['id']}-0"]).vectors.get(f"{file['id']}-0")
         if first:
-            stored_modified = first.metadata.get("modified")
-            if stored_modified == file["modifiedTime"]:
+            if (first.metadata.get("modified") == file["modifiedTime"]
+                    and first.metadata.get("format") == PASSAGE_FORMAT):
                 print(f"[{n}/{len(files)}] up to date  {file['name']}")
                 continue
-            if stored_modified is None:
-                # Stored by the first version of this script, which didn't save dates.
-                # Those files were stored on 2026-10-12, so just add the current date.
-                index.update(filter={"file_id": file["id"]}, set_metadata={"modified": file["modifiedTime"]})
-                print(f"[{n}/{len(files)}] added date  {file['name']}")
-                continue
-            # The file changed since it was stored: remove its old passages, then store it again.
+            # The file changed, or its passages were made the old way: remove them, then store it again.
             index.delete(filter={"file_id": file["id"]})
         try:
-            chunks = split_text(get_text(drive, sheets, file))
+            chunks = get_passages(drive, sheets, file)
             if not chunks:
                 print(f"[{n}/{len(files)}] no text  {file['name']}")
                 continue
@@ -162,6 +190,7 @@ def main():
                     "file_name": file["name"],
                     "file_id": file["id"],
                     "modified": file["modifiedTime"],
+                    "format": PASSAGE_FORMAT,
                     "text": chunk,
                 },
             }

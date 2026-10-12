@@ -13,12 +13,23 @@ PASSAGES_PER_QUESTION = 8
 # The embedding model's makers recommend putting this in front of questions (not passages).
 QUESTION_PREFIX = "Represent this sentence for searching relevant passages: "
 
-SYSTEM_PROMPT = """You answer questions about the user's own files from their Google Drive.
-You are given passages from those files. Answer using only those passages.
-After your answer, list the file names you used.
-If the passages don't contain the answer, say so plainly instead of guessing.
-Spreadsheet passages list cells like "C5: =SUM(C2:C4) -> 1250", meaning cell C5 holds that formula and shows that value.
-When asked about a formula, explain in plain words what it calculates."""
+SYSTEM_PROMPT = """You answer questions about the user's own files in their Google Drive.
+With each question you get the parts of their files that best match it, inside <document> tags.
+
+How to answer:
+- Answer only from those documents. Don't guess or use outside knowledge about the user's things.
+- Talk about the user's files by name ("your Television doc says..."). Never mention documents, \
+passages, excerpts, tags, or searching; the user doesn't see those.
+- If the documents don't answer the question, say you couldn't find it in their files and stop. \
+Don't offer information about other things they didn't ask about.
+- End with the names of the files you used.
+
+Spreadsheets:
+- One document per spreadsheet lists its tabs and each tab's column headings. Use it to explain how a file is laid out.
+- Other spreadsheet documents start with the file, tab and column headings, then list cells like \
+"C5 (Amount): =SUM(C2:C4) -> 1,250": cell C5, in the Amount column, holds that formula and shows that value.
+- When asked about a formula, explain in plain words what it calculates and which cells it uses.
+- You may only see part of a tab. Don't say a tab has nothing else in it unless the document shows the whole tab."""
 
 
 def find_passages(index, model, question):
@@ -31,7 +42,7 @@ def find_passages(index, model, question):
 def ask_claude(client, question, passages):
     """Send the question and passages to Claude, giving back the answer piece by piece as it arrives."""
     passage_text = "\n\n".join(
-        f'<passage file="{p["file_name"]}">\n{p["text"]}\n</passage>' for p in passages
+        f'<document file="{p["file_name"]}">\n{p["text"]}\n</document>' for p in passages
     )
     with client.messages.stream(
         model=CLAUDE_MODEL,

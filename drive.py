@@ -8,8 +8,8 @@ from googleapiclient.discovery import build
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
 
-def get_drive():
-    """Sign in to Google Drive, reusing the saved login in token.json if there is one."""
+def get_creds():
+    """Sign in to Google, reusing the saved login in token.json if there is one."""
     creds = None
     if os.path.exists("token.json"):
         creds = Credentials.from_authorized_user_file("token.json", SCOPES)
@@ -21,7 +21,15 @@ def get_drive():
             creds = flow.run_local_server(port=0)
         with open("token.json", "w") as f:
             f.write(creds.to_json())
-    return build("drive", "v3", credentials=creds)
+    return creds
+
+
+def get_drive():
+    return build("drive", "v3", credentials=get_creds())
+
+
+def get_sheets():
+    return build("sheets", "v4", credentials=get_creds())
 
 
 def list_my_files(drive):

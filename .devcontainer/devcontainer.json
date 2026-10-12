@@ -1,0 +1,9 @@
+{
+  "name": "chatbot",
+  "image": "mcr.microsoft.com/devcontainers/python:1-3.12",
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python"]
+    }
+  }
+}

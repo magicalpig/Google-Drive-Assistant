@@ -67,6 +67,8 @@ def get_text(drive, sheets, file):
 
 def split_text(text):
     """Split text into passages of about CHUNK_SIZE characters, keeping paragraphs together."""
+    # Some PDFs contain broken characters that crash the embedding model; replace them with "?".
+    text = text.encode("utf-8", errors="replace").decode("utf-8")
     chunks = []
     current = ""
     for paragraph in text.split("\n"):
@@ -144,14 +146,14 @@ def main():
             index.delete(filter={"file_id": file["id"]})
         try:
             chunks = split_text(get_text(drive, sheets, file))
+            if not chunks:
+                print(f"[{n}/{len(files)}] no text  {file['name']}")
+                continue
+            vectors = model.encode(chunks, normalize_embeddings=True)
         except Exception as e:
             print(f"[{n}/{len(files)}] SKIPPED {file['name']}: {e}")
             continue
-        if not chunks:
-            print(f"[{n}/{len(files)}] no text  {file['name']}")
-            continue
 
-        vectors = model.encode(chunks, normalize_embeddings=True)
         records = [
             {
                 "id": f"{file['id']}-{i}",

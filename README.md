@@ -41,7 +41,7 @@ Each question costs about $0.0004–0.001 in Anthropic credits (Claude Haiku 5.5
 ## How a question is answered
 
 1. **Your question is turned into numbers.** The embedding model (`BAAI/bge-small-en-v1.5`) turns the question into a list of 384 numbers called a vector. Text with similar meaning gets similar numbers, even when the words differ. The model file is downloaded once (about 130 MB), and the `sentence-transformers` library uses it on your own computer.
-2. **Pinecone finds the closest passages.** Pinecone compares the question's vector with the stored passage vectors and returns the 8 closest passages.
+2. **Pinecone finds the closest passages.** Pinecone compares the question's vector with the stored passage vectors and returns the 8 closest passages. If the question mentions a year, like 2025, files in other tax-year folders are left out. Files outside the tax-year folders are always included.
 3. **Claude writes the answer.** The question and those 8 passages are sent to Claude, which answers using only the passages and lists the files it used. If the passages don't contain the answer, it says it couldn't find it and stops. Its instructions are `SYSTEM_PROMPT` in `chat.py`.
 
 ## What's stored in Pinecone
@@ -75,7 +75,8 @@ Each passage is stored as one record with:
 
 - its vector (the 384 numbers from the embedding model)
 - the passage text that Claude reads. For spreadsheets, this can differ from the text that was embedded.
-- the file name and Google Drive file ID
+- the file name with its folder path (like `Tax/Tax 2025/W2.pdf`), and its Google Drive file ID
+- the tax year of its folder, or 0 if it isn't in a `Tax/Tax <year>` folder
 - the file's last-modified time in Drive
 - the passage format number (`PASSAGE_FORMAT` in `ingest.py`)
 
@@ -108,6 +109,7 @@ Only files that meet all of these:
 
 - You own them. Files shared with you are left out, including files in shared drives.
 - They aren't in the trash.
+- They aren't in an old tax-year folder. Files in a subfolder of **Tax** named for a year before 2025, like `Tax/Tax 2021`, are skipped, and their passages are removed from Pinecone. The cutoff is `EARLIEST_TAX_YEAR` in `ingest.py`.
 - They are one of these types:
   - **Google Docs:** the text
   - **Google Sheets:** every non-empty cell in every tab, with its formula and the value it shows, plus named ranges and named functions. Apps Script functions aren't read.

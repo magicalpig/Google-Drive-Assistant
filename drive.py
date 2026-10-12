@@ -32,15 +32,17 @@ def get_sheets():
     return build("sheets", "v4", credentials=get_creds())
 
 
-def list_my_files(drive):
-    """List files you own (not ones shared with you), skipping folders and trashed files."""
-    query = "'me' in owners and trashed = false and mimeType != 'application/vnd.google-apps.folder'"
+FOLDER = "application/vnd.google-apps.folder"
+
+
+def list_all(drive, query, fields):
+    """Run a Drive file search and return every result, across as many pages as it takes."""
     files = []
     page_token = None
     while True:
         result = drive.files().list(
             q=query,
-            fields="nextPageToken, files(id, name, mimeType, modifiedTime)",
+            fields=f"nextPageToken, files({fields})",
             pageSize=1000,
             pageToken=page_token,
         ).execute()
@@ -48,6 +50,30 @@ def list_my_files(drive):
         page_token = result.get("nextPageToken")
         if not page_token:
             return files
+
+
+def list_my_files(drive):
+    """List files you own (not ones shared with you), skipping folders and trashed files.
+
+    Each file gets a "folder" entry: its folder path, like "Tax/Tax 2025" ("" for My Drive).
+    """
+    folders = {f["id"]: f for f in list_all(drive, f"mimeType = '{FOLDER}' and trashed = false", "id, name, parents")}
+
+    def folder_path(folder_id):
+        names = []
+        while folder_id in folders:
+            names.append(folders[folder_id]["name"])
+            folder_id = (folders[folder_id].get("parents") or [None])[0]
+        return "/".join(reversed(names))
+
+    files = list_all(
+        drive,
+        f"'me' in owners and trashed = false and mimeType != '{FOLDER}'",
+        "id, name, mimeType, modifiedTime, parents",
+    )
+    for f in files:
+        f["folder"] = folder_path((f.get("parents") or [None])[0])
+    return files
 
 
 if __name__ == "__main__":

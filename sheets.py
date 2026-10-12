@@ -222,7 +222,8 @@ def sheet_passages(drive, sheets, client, file):
         fields="namedRanges(name,range),"
                "sheets(properties(sheetId,title),data.rowData.values(userEnteredValue,formattedValue))",
     ).execute()
-    name = file["name"]
+    # Shown in every passage: the name with its folder path, like "Tax/Tax 2025/HSA report".
+    name = f"{file['folder']}/{file['name']}" if file.get("folder") else file["name"]
 
     # Read every tab's cells and column headings, and group the formulas.
     tabs, groups, tab_titles = [], {}, {}
@@ -290,7 +291,7 @@ def sheet_passages(drive, sheets, client, file):
     functions = read_named_functions(drive, file["id"])
 
     function_descriptions, formula_descriptions = {}, {}
-    if name in DESCRIBE_FORMULAS_IN and client and (groups or functions):
+    if file["name"] in DESCRIBE_FORMULAS_IN and client and (groups or functions):
         function_descriptions, formula_descriptions = describe(
             client, name, tabs, named_ranges, functions, list(groups.values()))
 

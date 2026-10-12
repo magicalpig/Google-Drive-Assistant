@@ -1,4 +1,5 @@
 import os
+import re
 
 import anthropic
 from dotenv import load_dotenv
@@ -38,9 +39,19 @@ copied formulas do (one row down means row numbers go up by one, except ones wit
 
 
 def find_passages(index, model, question):
-    """Return the stored passages closest in meaning to the question."""
+    """Return the stored passages closest in meaning to the question.
+
+    If the question mentions a year, tax files from other years are left out. Files that aren't
+    in a Tax year folder (stored with year 0) are always searched.
+    """
     vector = model.encode(QUESTION_PREFIX + question, normalize_embeddings=True)
-    result = index.query(vector=vector.tolist(), top_k=PASSAGES_PER_QUESTION, include_metadata=True)
+    years = [int(y) for y in re.findall(r"(?<!\d)20\d\d(?!\d)", question)]
+    result = index.query(
+        vector=vector.tolist(),
+        top_k=PASSAGES_PER_QUESTION,
+        include_metadata=True,
+        filter={"year": {"$in": [0] + years}} if years else None,
+    )
     return [match.metadata for match in result.matches]
 
 

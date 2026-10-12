@@ -1,5 +1,6 @@
 import io
 import os
+import re
 import sys
 
 import anthropic
@@ -18,12 +19,30 @@ CHUNK_SIZE = 1000  # characters per passage, roughly a few paragraphs
 # Raise this when the way passages are made changes, so the next run stores every file again.
 # 2: passages start with the file name; Sheets passages also have the tab name and column headings.
 # 3: Sheets formulas are grouped and named, with named ranges, named functions and descriptions.
+#    File names include their folder path, and tax files have a "year".
 PASSAGE_FORMAT = 3
+
+# Files in a subfolder of Tax named for a year before this one (like "Tax/Tax 2021") are skipped.
+EARLIEST_TAX_YEAR = 2025
 
 GOOGLE_DOC = "application/vnd.google-apps.document"
 GOOGLE_SHEET = "application/vnd.google-apps.spreadsheet"
 PDF = "application/pdf"
 TEXT = "text/plain"
+
+
+def tax_year(file):
+    """The year of the Tax subfolder a file is in, like 2021 for "Tax/Tax 2021/W2.pdf". 0 if none."""
+    parts = file["folder"].split("/")
+    if len(parts) < 2 or parts[0] != "Tax":
+        return 0
+    match = re.search(r"(?<!\d)(?:19|20)\d\d(?!\d)", parts[1])
+    return int(match.group()) if match else 0
+
+
+def full_name(file):
+    """The file's name with its folder path, like "Tax/Tax 2025/W2.pdf"."""
+    return f"{file['folder']}/{file['name']}" if file["folder"] else file["name"]
 
 
 def clean(text):
@@ -35,7 +54,8 @@ def get_passages(drive, sheets, client, file):
     """Download a Google Doc, Google Sheet, PDF, or .txt file from Drive and split it into passages.
 
     Returns (text to embed, text Claude reads) pairs. For everything except Sheets, the two are
-    the same. Every passage starts with the file name, so questions can match on the name too.
+    the same. Every passage starts with the file's folder path and name, so questions can match
+    on those too.
     """
     if file["mimeType"] == GOOGLE_SHEET:
         passages = sheet_passages(drive, sheets, client, file)
@@ -50,7 +70,7 @@ def get_passages(drive, sheets, client, file):
         else:
             reader = PdfReader(io.BytesIO(data))
             text = "\n\n".join(page.extract_text() or "" for page in reader.pages)
-    passages = [f"File: {file['name']}\n{passage}" for passage in split_text(text)]
+    passages = [f"File: {full_name(file)}\n{passage}" for passage in split_text(text)]
     return [(passage, passage) for passage in passages]
 
 
@@ -112,8 +132,9 @@ def main():
     index = get_index(pc, model.get_embedding_dimension())
 
     files = [f for f in list_my_files(drive) if f["mimeType"] in (GOOGLE_DOC, GOOGLE_SHEET, PDF, TEXT)]
-    files = files[:limit]
-    print(f"{len(files)} files to process")
+    old_tax = [f for f in files if 0 < tax_year(f) < EARLIEST_TAX_YEAR]
+    files = [f for f in files if f not in old_tax][:limit]
+    print(f"{len(files)} files to process ({len(old_tax)} skipped in Tax folders before {EARLIEST_TAX_YEAR})")
 
     if limit is None:
         remove_deleted_files(index, {f["id"] for f in files})
@@ -142,8 +163,9 @@ def main():
                 "id": f"{file['id']}-{i}",
                 "values": vector.tolist(),
                 "metadata": {
-                    "file_name": file["name"],
+                    "file_name": full_name(file),
                     "file_id": file["id"],
+                    "year": tax_year(file),  # 0 unless the file is in a Tax subfolder for a year
                     "modified": file["modifiedTime"],
                     "format": PASSAGE_FORMAT,
                     # Pinecone allows 40 KB of these details per passage; long formulas could pass that.

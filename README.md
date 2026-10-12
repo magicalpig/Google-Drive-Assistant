@@ -69,7 +69,7 @@ Spreadsheets are handled by `sheets.py`. Their passages are up to about 2,000 ch
 
 For those spreadsheets, the descriptions are what get embedded, so questions in everyday words can find formulas. For other spreadsheets, the first 150 characters of each raw formula are embedded instead. Either way, Claude reads the full raw formula when answering.
 
-A spreadsheet is only described again when it changes in Drive, or when `PASSAGE_FORMAT` is raised.
+Descriptions are saved in `formula_descriptions.json`, on whichever computer runs ingest (the codespace). A later run asks Claude only about named functions and formulas that are new or changed. Editing values costs nothing, and changing one formula costs about a cent. A formula counts as unchanged if it's the same apart from shifted references, in the same tab, with the same labels. The file isn't on GitHub. If it's lost, the next run describes everything again, about $1.50 for all three.
 
 ### What each record holds
 

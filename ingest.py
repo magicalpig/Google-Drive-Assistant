@@ -16,6 +16,7 @@ CHUNK_SIZE = 1000  # characters per passage, roughly a few paragraphs
 GOOGLE_DOC = "application/vnd.google-apps.document"
 GOOGLE_SHEET = "application/vnd.google-apps.spreadsheet"
 PDF = "application/pdf"
+TEXT = "text/plain"
 
 
 def column_letter(n):
@@ -51,13 +52,15 @@ def get_sheet_text(sheets, file_id):
 
 
 def get_text(drive, sheets, file):
-    """Download a Google Doc, Google Sheet, or PDF from Drive and return its text."""
+    """Download a Google Doc, Google Sheet, PDF, or .txt file from Drive and return its text."""
     if file["mimeType"] == GOOGLE_SHEET:
         return get_sheet_text(sheets, file["id"])
     if file["mimeType"] == GOOGLE_DOC:
         data = drive.files().export(fileId=file["id"], mimeType="text/plain").execute()
         return data.decode("utf-8", errors="replace")
     data = drive.files().get_media(fileId=file["id"]).execute()
+    if file["mimeType"] == TEXT:
+        return data.decode("utf-8", errors="replace")
     reader = PdfReader(io.BytesIO(data))
     return "\n\n".join(page.extract_text() or "" for page in reader.pages)
 
@@ -117,7 +120,7 @@ def main():
     pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
     index = get_index(pc, model.get_embedding_dimension())
 
-    files = [f for f in list_my_files(drive) if f["mimeType"] in (GOOGLE_DOC, GOOGLE_SHEET, PDF)]
+    files = [f for f in list_my_files(drive) if f["mimeType"] in (GOOGLE_DOC, GOOGLE_SHEET, PDF, TEXT)]
     files = files[:limit]
     print(f"{len(files)} files to process")
 

@@ -6,3 +6,5 @@ node_modules/
 # Secrets
 .env
 
+credentials.json
+token.json

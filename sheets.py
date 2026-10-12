@@ -38,13 +38,22 @@ RANGE = re.compile(r"(C\[?-?\d+\]?(?:R\[?-?\d+\]?)?):(C\[?-?\d+\]?(?:R\[?-?\d+\]
 END = re.compile(r"(C\[?-?\d+\]?)(R\[?-?\d+\]?)?")
 # Text in double quotes, or a tab name in single quotes. References inside these aren't changed.
 QUOTED = re.compile(r"(\"[^\"]*\"|'[^']*')")
+QUOTED_TEXT = re.compile(r"(\"[^\"]*\")")
+# A cell or range, maybe on another tab, like B6, $B$6, 'Sched C'!B46, Sheet1!A3:A18 or Sheet1!$A$3:$A.
+TAB_REFERENCE = re.compile(
+    r"(?:(?:'(?P<quoted_tab>[^']+)'|(?P<tab>[A-Za-z0-9_]+))!)?"
+    r"\$?(?P<start_col>[A-Z]{1,3})\$?(?P<start_row>\d*)"
+    r"(?::\$?(?P<end_col>[A-Z]{1,3})\$?(?P<end_row>\d*))?"
+)
 
 DESCRIBE_SYSTEM = """You explain spreadsheet formulas to the person who owns the spreadsheet.
 For each named function and formula group you're given, write one or two plain sentences saying
 what it calculates. Refer to columns by their headings and to named ranges by name, not by cell
 letters, where you can. A formula group is one formula copied into many cells with its cell
 references shifted for each cell, so describe what it does for any one row or column (for example,
-"this row's Amount divided by 65"). Use everyday words. No jargon."""
+"this row's Amount divided by 65"). A formula may come with "Where:" labels saying what the cells it
+refers to are, taken from the row label and column heading next to each cell; use them.
+Use everyday words. No jargon."""
 
 
 def column_letter(n):
@@ -114,6 +123,63 @@ def find_heading_row(rows):
     return -max(candidates)[1]
 
 
+def cell_label(tab, row, col, with_heading=True):
+    """What a cell is, from its row label and column heading, like "Standard deduction" or
+    "Total income / Amount". Row and col are 0-based. "" if there's nothing to go on."""
+    parts = []
+    rows = tab["rows"]
+    if row < len(rows):
+        # The row label is the nearest text cell to the left, usually in column A.
+        for c in range(min(col, len(rows[row])) - 1, -1, -1):
+            text = rows[row][c].get("userEnteredValue", {}).get("stringValue", "").strip()
+            if text:
+                parts.append(text)
+                break
+    if with_heading and col in tab["headings"] and row != tab["heading_row"]:
+        parts.append(tab["headings"][col])
+    return " / ".join(parts)
+
+
+def reference_labels(formula, tab, tabs_by_title, limit=10):
+    """Labels for the cells a formula refers to, like ["B6 = Total income", "B7 = Adjustments"].
+
+    Covers single cells, and ranges within one column (labeled by the column heading) or one row
+    (labeled by the row label). References to other tabs use that tab's labels.
+    """
+    labels = []
+    for part in QUOTED_TEXT.split(formula)[::2]:  # skip text in double quotes
+        for m in TAB_REFERENCE.finditer(part):
+            before = part[m.start() - 1] if m.start() else ""
+            after = part[m.end()] if m.end() < len(part) else ""
+            if (before and (before.isalnum() or before in "_.")) or (after and (after.isalnum() or after in "_(.!")):
+                continue
+            target = tabs_by_title.get(m["quoted_tab"] or m["tab"]) if (m["quoted_tab"] or m["tab"]) else tab
+            if target is None or not (m["start_row"] or m["end_col"]):
+                continue
+            col = column_number(m["start_col"])
+            row = int(m["start_row"]) - 1 if m["start_row"] else None
+            if row is None:  # a whole column, like J:J
+                label = target["headings"].get(col, "") if column_number(m["end_col"]) == col else ""
+            elif m["end_col"]:  # a range
+                end_col = column_number(m["end_col"])
+                end_row = int(m["end_row"]) - 1 if m["end_row"] else None
+                if end_col == col:
+                    label = target["headings"].get(col, "")
+                elif end_row == row:
+                    label = cell_label(target, row, col, with_heading=False)
+                else:
+                    label = ""
+            else:
+                label = cell_label(target, row, col)
+            if label:
+                text = f"{m.group().replace('$', '')} = {label}"
+                if text not in labels:
+                    labels.append(text)
+            if len(labels) >= limit:
+                return labels
+    return labels
+
+
 def read_named_functions(drive, file_id):
     """Return {name: definition} for the spreadsheet's named functions, from Google's Excel export."""
     try:
@@ -156,8 +222,9 @@ def describe(client, file_name, tabs, named_ranges, functions, groups):
         lines += [f'<function name="{name}">\n{definition}\n</function>' for name, definition in functions.items()]
     lines += ["", "Formula groups (each shown as written in its first cell):"]
     for g in groups:
+        where = f"\nWhere: {'; '.join(g['labels'])}" if g["labels"] else ""
         lines.append(f'<formula number="{g["number"]}" tab="{g["tab"]}" column="{g["column"]}" '
-                     f'cells="{g["span"]}">\n{g["formula"]}\n</formula>')
+                     f'cells="{g["span"]}">\n{g["formula"]}{where}\n</formula>')
 
     schema = {
         "type": "object",
@@ -232,14 +299,17 @@ def sheet_passages(drive, sheets, client, file):
         tab_titles[sheet["properties"].get("sheetId", 0)] = title
         rows = [row.get("values", []) for grid in sheet.get("data", []) for row in grid.get("rowData", [])]
         heading_row = find_heading_row(rows)
+        # Only text counts as a heading, not numbers or dates.
         headings = {} if heading_row is None else {
-            col: c["formattedValue"].strip()
+            col: c["userEnteredValue"]["stringValue"].strip()
             for col, c in enumerate(rows[heading_row])
-            if c.get("formattedValue", "").strip()
+            if c.get("userEnteredValue", {}).get("stringValue", "").strip()
         }
         tab = {
             "title": title,
             "rows": rows,
+            "headings": headings,
+            "heading_row": heading_row,
             "heading_list": ", ".join(f"{column_letter(col)} = {h}" for col, h in headings.items()),
             "cells": [],  # (cell name, value shown, formula group number or None)
         }
@@ -270,9 +340,11 @@ def sheet_passages(drive, sheets, client, file):
                 tab["cells"].append((cell_name, shown, groups[key]["number"]))
         tabs.append(tab)
 
+    tabs_by_title = {tab["title"]: tab for tab in tabs}
     for g in groups.values():
         count = len(g["cells"])
         g["span"] = g["first"] if count == 1 else f"{count} cells, {g['cells'][0]} to {g['cells'][-1]}"
+        g["labels"] = reference_labels(g["formula"], tabs_by_title[g["tab"]], tabs_by_title)
 
     # Named ranges, with the value shown in the cell when the range is a single cell.
     named_ranges = []
@@ -329,9 +401,12 @@ def sheet_passages(drive, sheets, client, file):
         g = by_number[number]
         description = formula_descriptions.get(number, "")
         raw = " ".join(g["formula"].split())
-        embed = f"[Formula {names[number]}]: {description or raw[:EMBED_FORMULA_CHARS]}"
+        where = "; ".join(g["labels"])
+        embed = f"[Formula {names[number]}]: " + (description or raw[:EMBED_FORMULA_CHARS] + (f" (where {where})" if where else ""))
         read = (f"[Formula {names[number]}]: " + (f"{description}\n  " if description else "")
-                + f"Written in {g['first']} as: {g['formula']}\n  Used in {g['span']}"
+                + f"Written in {g['first']} as: {g['formula']}"
+                + (f"\n  Where (in {g['first']}): {where}" if where else "")
+                + f"\n  Used in {g['span']}"
                 + ("; in each cell the references shift with the cell's position." if g["shifts"] else "."))
         return embed, read
 
@@ -343,11 +418,12 @@ def sheet_passages(drive, sheets, client, file):
         if number in names:
             line = f"{cell_name}: [Formula {names[number]}] -> {shown}"
             return line, line
-        formula = by_number[number]["formula"]
+        g = by_number[number]
         description = formula_descriptions.get(number, "")
-        raw = " ".join(formula.split())
-        embed = f"{cell_name}: {description or raw[:EMBED_FORMULA_CHARS]} -> {shown}"
-        read = f"{cell_name}: {formula} -> {shown}" + (f"  ({description})" if description else "")
+        raw = " ".join(g["formula"].split())
+        where = f" (where {'; '.join(g['labels'])})" if g["labels"] else ""
+        embed = f"{cell_name}: {description or raw[:EMBED_FORMULA_CHARS] + where} -> {shown}"
+        read = f"{cell_name}: {g['formula']} -> {shown}{where}" + (f"  [{description}]" if description else "")
         return embed, read
 
     for tab in tabs:

@@ -59,6 +59,8 @@ Spreadsheets are handled by `sheets.py`. Their passages are up to about 2,000 ch
 
 **Repeated formulas are written once.** Formulas that are the same apart from shifted cell references, like `=D2/65` in F2 and `=D3/65` in F3, count as one formula. This works the way copying a formula works: references without `$` shift, references with `$` stay fixed. A formula used in several cells is named, like `[Formula 2]`, and written out once at the top of each passage that uses it. Its cells say `F3 (Hours worked): [Formula 2] -> 5.50`. A formula used in only one cell is written in that cell's line.
 
+**Labels for cell references (free, all spreadsheets):** each formula is stored with what the cells it refers to are, taken from the row label (the nearest text to the left, usually column A) and the column heading. For example: `=B18+B15 (where B18 = Line 9. SE tax; B15 = Line 4. tax)`. Whole columns like `J:J` get their column heading. Up to 10 labels per formula.
+
 **Formula descriptions (costs credits):** for spreadsheets listed in `DESCRIBE_FORMULAS_IN` in `sheets.py`, ingest asks Claude (`DESCRIBE_MODEL`, now Opus 5.5) to write a plain-English description of each formula and named function. For example: "Hours worked = this row's Amount ÷ 65." It makes one request per spreadsheet and prints what it cost. The HSA Transaction report cost about $0.06. The listed spreadsheets are:
 
 - Payroll 2026

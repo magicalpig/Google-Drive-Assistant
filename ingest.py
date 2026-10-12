@@ -7,7 +7,7 @@ from pinecone import Pinecone, ServerlessSpec
 from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
 
-from drive import connect_to_drive, connect_to_sheets, list_my_files
+from drive import get_drive, get_sheets, list_my_files
 
 INDEX_NAME = "chatbot"
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"  # small (~130 MB), makes 384 numbers per passage
@@ -116,8 +116,8 @@ def main():
     limit = int(sys.argv[1]) if len(sys.argv) > 1 else None
 
     load_dotenv()
-    drive = connect_to_drive()
-    sheets = connect_to_sheets()
+    drive = get_drive()
+    sheets = get_sheets()
     model = SentenceTransformer(EMBEDDING_MODEL)
     pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
     index = get_index(pc, model.get_embedding_dimension())

@@ -24,11 +24,11 @@ def get_creds():
     return creds
 
 
-def connect_to_drive():
+def get_drive():
     return build("drive", "v3", credentials=get_creds())
 
 
-def connect_to_sheets():
+def get_sheets():
     return build("sheets", "v4", credentials=get_creds())
 
 
@@ -51,5 +51,5 @@ def list_my_files(drive):
 
 
 if __name__ == "__main__":
-    for f in list_my_files(connect_to_drive()):
+    for f in list_my_files(get_drive()):
         print(f"{f['mimeType']:50} {f['name']}")

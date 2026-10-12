@@ -40,7 +40,7 @@ def list_my_files(drive):
     while True:
         result = drive.files().list(
             q=query,
-            fields="nextPageToken, files(id, name, mimeType)",
+            fields="nextPageToken, files(id, name, mimeType, modifiedTime)",
             pageSize=1000,
             pageToken=page_token,
         ).execute()

@@ -95,6 +95,17 @@ def get_index(pc, dimension):
     return pc.Index(INDEX_NAME)
 
 
+def remove_deleted_files(index, current_file_ids):
+    """Delete passages of files that are no longer in Drive."""
+    stored_file_ids = set()
+    for page in index.list():
+        for item in page.vectors:
+            stored_file_ids.add(item.id.rsplit("-", 1)[0])  # "<file id>-<passage number>"
+    for file_id in stored_file_ids - current_file_ids:
+        index.delete(filter={"file_id": file_id})
+        print(f"removed deleted file  {file_id}")
+
+
 def main():
     # Optional: "python ingest.py 5" only does the first 5 files, for testing.
     limit = int(sys.argv[1]) if len(sys.argv) > 1 else None
@@ -110,11 +121,24 @@ def main():
     files = files[:limit]
     print(f"{len(files)} files to process")
 
+    if limit is None:
+        remove_deleted_files(index, {f["id"] for f in files})
+
     for n, file in enumerate(files, 1):
-        # Skip files already stored by an earlier run (their first passage is in Pinecone).
-        if index.fetch(ids=[f"{file['id']}-0"]).vectors:
-            print(f"[{n}/{len(files)}] already stored  {file['name']}")
-            continue
+        first = index.fetch(ids=[f"{file['id']}-0"]).vectors.get(f"{file['id']}-0")
+        if first:
+            stored_modified = first.metadata.get("modified")
+            if stored_modified == file["modifiedTime"]:
+                print(f"[{n}/{len(files)}] up to date  {file['name']}")
+                continue
+            if stored_modified is None:
+                # Stored by the first version of this script, which didn't save dates.
+                # Those files were stored on 2026-10-12, so just add the current date.
+                index.update(filter={"file_id": file["id"]}, set_metadata={"modified": file["modifiedTime"]})
+                print(f"[{n}/{len(files)}] added date  {file['name']}")
+                continue
+            # The file changed since it was stored: remove its old passages, then store it again.
+            index.delete(filter={"file_id": file["id"]})
         try:
             chunks = split_text(get_text(drive, sheets, file))
         except Exception as e:
@@ -129,7 +153,12 @@ def main():
             {
                 "id": f"{file['id']}-{i}",
                 "values": vector.tolist(),
-                "metadata": {"file_name": file["name"], "file_id": file["id"], "text": chunk},
+                "metadata": {
+                    "file_name": file["name"],
+                    "file_id": file["id"],
+                    "modified": file["modifiedTime"],
+                    "text": chunk,
+                },
             }
             for i, (chunk, vector) in enumerate(zip(chunks, vectors))
         ]

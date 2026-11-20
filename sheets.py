@@ -6,7 +6,7 @@ For every spreadsheet:
   and its cells refer to it by name, instead of repeating it in every cell.
 - Named ranges (like CURRENT_YEAR) are read from the Sheets API, and named functions
   (like CALC_PAYROLL) from Google's Excel export of the file.
-- For spreadsheets listed in DESCRIBE_FORMULAS_IN, Claude writes a plain-English description of
+- For spreadsheets listed in DESCRIBE_FORMULAS_IN in .env, Claude writes a plain-English description of
   each formula group and named function. The descriptions are what get embedded, so questions in
   everyday words can find them. Other spreadsheets embed the start of the raw formula instead.
 
@@ -18,10 +18,8 @@ import re
 import zipfile
 import xml.etree.ElementTree as ET
 
-# Spreadsheets whose formulas Claude describes. This costs API credits; other spreadsheets don't.
-DESCRIBE_FORMULAS_IN = ["Payroll 2026", "Business Expenses 2026", "HSA Transaction report 2026"]
-DESCRIBE_MODEL = "claude-opus-5-5"
-DESCRIBE_PRICES = (4.00, 20.00)  # dollars per million tokens sent and received, for DESCRIBE_MODEL
+from settings import DESCRIBE_FORMULAS_IN, DESCRIBE_MODEL, DESCRIBE_PRICES
+
 # Descriptions already written, so later runs only pay for new or changed formulas.
 SAVED_DESCRIPTIONS = "formula_descriptions.json"
 

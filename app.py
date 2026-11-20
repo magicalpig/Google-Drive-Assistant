@@ -7,11 +7,11 @@ from pinecone import Pinecone
 from sentence_transformers import SentenceTransformer
 
 from chat import ask_claude, find_passages
-from ingest import EMBEDDING_MODEL, INDEX_NAME
+from settings import EMBEDDING_MODEL, PINECONE_INDEX
 
 load_dotenv()
 model = SentenceTransformer(EMBEDDING_MODEL)
-index = Pinecone(api_key=os.environ["PINECONE_API_KEY"]).Index(INDEX_NAME)
+index = Pinecone(api_key=os.environ["PINECONE_API_KEY"]).Index(PINECONE_INDEX)
 client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
 app = Flask(__name__)

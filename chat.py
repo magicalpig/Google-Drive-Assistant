@@ -6,13 +6,9 @@ from dotenv import load_dotenv
 from pinecone import Pinecone
 from sentence_transformers import SentenceTransformer
 
-from ingest import EMBEDDING_MODEL, INDEX_NAME
+from settings import CLAUDE_MODEL, EMBEDDING_MODEL, PINECONE_INDEX, QUESTION_PREFIX
 
-CLAUDE_MODEL = "claude-haiku-5-5"
 PASSAGES_PER_QUESTION = 8
-
-# The embedding model's makers recommend putting this in front of questions (not passages).
-QUESTION_PREFIX = "Represent this sentence for searching relevant passages: "
 
 SYSTEM_PROMPT = """You answer questions about the user's own files in their Google Drive.
 With each question you get the parts of their files that best match it, inside <document> tags.
@@ -44,7 +40,9 @@ def find_passages(index, model, question):
     If the question mentions a year, tax files from other years are left out. Files that aren't
     in a Tax year folder (stored with year 0) are always searched.
     """
-    vector = model.encode(QUESTION_PREFIX + question, normalize_embeddings=True)
+    # Some embedding models expect text in front of questions (not passages).
+    text = f"{QUESTION_PREFIX} {question}" if QUESTION_PREFIX else question
+    vector = model.encode(text, normalize_embeddings=True)
     years = [int(y) for y in re.findall(r"(?<!\d)20\d\d(?!\d)", question)]
     result = index.query(
         vector=vector.tolist(),
@@ -75,7 +73,7 @@ def ask_claude(client, question, passages):
 def main():
     load_dotenv()
     model = SentenceTransformer(EMBEDDING_MODEL)
-    index = Pinecone(api_key=os.environ["PINECONE_API_KEY"]).Index(INDEX_NAME)
+    index = Pinecone(api_key=os.environ["PINECONE_API_KEY"]).Index(PINECONE_INDEX)
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
     print("Ask a question about your files. Press Enter on an empty line to quit.")

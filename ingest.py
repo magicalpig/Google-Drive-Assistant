@@ -10,10 +10,9 @@ from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
 
 from drive import get_drive, get_sheets, list_my_files
+from settings import DEFAULT_EMBEDDING_MODEL, EMBEDDING_MODEL, PINECONE_INDEX as INDEX_NAME
 from sheets import sheet_passages
 
-INDEX_NAME = "chatbot"
-EMBEDDING_MODEL = "BAAI/bge-base-en-v1.5"  # ~440 MB, makes 768 numbers per passage
 CHUNK_SIZE = 1000  # characters per passage, roughly a few paragraphs
 
 # Raise this when the way passages are made changes, so the next run stores every file again.
@@ -149,11 +148,15 @@ def main():
     for n, file in enumerate(files, 1):
         first = index.fetch(ids=[f"{file['id']}-0"]).vectors.get(f"{file['id']}-0")
         if first:
+            # Passages stored before the model was recorded were made with the default model.
+            stored_model = first.metadata.get("embedding_model", DEFAULT_EMBEDDING_MODEL)
             if (first.metadata.get("modified") == file["modifiedTime"]
-                    and first.metadata.get("format") == PASSAGE_FORMAT):
+                    and first.metadata.get("format") == PASSAGE_FORMAT
+                    and stored_model == EMBEDDING_MODEL):
                 print(f"[{n}/{len(files)}] up to date  {file['name']}")
                 continue
-            # The file changed, or its passages were made the old way: remove them, then store it again.
+            # The file changed, or its passages were made the old way or with another embedding
+            # model: remove them, then store it again.
             index.delete(filter={"file_id": file["id"]})
         try:
             passages = get_passages(drive, sheets, client, file)
@@ -175,6 +178,7 @@ def main():
                     "year": tax_year(file),  # 0 unless the file is in a Tax subfolder for a year
                     "modified": file["modifiedTime"],
                     "format": PASSAGE_FORMAT,
+                    "embedding_model": EMBEDDING_MODEL,
                     # Pinecone allows 40 KB of these details per passage; long formulas could pass that.
                     "text": read[:30000],
                 },

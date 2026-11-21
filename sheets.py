@@ -1,16 +1,35 @@
 """Turn a Google Sheet into passages for the chatbot.
 
 For every spreadsheet:
-- Cell formulas that are the same apart from shifted cell references (like =D2/65 in F2 and
-  =D3/65 in F3) are grouped and named, like [Formula 3]. Each passage writes a formula out once
-  and its cells refer to it by name, instead of repeating it in every cell.
-- Named ranges (like CURRENT_YEAR) are read from the Sheets API, and named functions
-  (like CALC_PAYROLL) from Google's Excel export of the file.
+- Cell formulas that are the same other than shifted cell references (like =D2/65 in F2 and =D3/65 in F3)
+  are considered equivalent and given an alias, like "[Formula 3]". Each passage will have a section
+  describing these aliased formulas, and will write the cells in terms of the aliases rather than repeating
+  the raw formula. For example, a passage could be
+  
+    File: Payroll | Tab: Hours | Columns: A = Name, B = Date, C = Hours, D = Pay, F = Rate
+    Formulas:
+    [Formula 3]: Written in F2 as: =D2/65
+        Used in F2:F40; in each cell the references shift with the cell's position.
+    Cells:
+    F2: [Formula 3] -> 120
+    F3: [Formula 3] -> 95
+
+- Named ranges (e.g. CURRENT_YEAR) are read from the Sheets API
+- Named functions (e.g. CALC_PAYROLL) can't be read through Google's Sheets API. To get around this limitation,
+  sheets are exported to an Excel file (held in memory temporarily), which includes readable function definitions.
 - For spreadsheets listed in DESCRIBE_FORMULAS_IN in .env, Claude writes a plain-English description of
   each formula group and named function. The descriptions are what get embedded, so questions in
-  everyday words can find them. Other spreadsheets embed the start of the raw formula instead.
+  everyday words can find them.
+  If a spreadsheet is NOT listed in DESCRIBE_FORMULAS_IN,
+    the first EMBED_FORMULA_CHARS     characters of each raw formula and
+    the first EMBED_FORMULA_CHARS * 2 characters of each raw named function 
+  are embedded instead of a Claude-generated description.
 
-Each passage is a pair: (text to embed, text Claude reads when answering).
+ Each passage has 2 parts:
+    text to embed - turned into numbers and used only to decide which passages match a question.
+        Uses formula descriptions when there are any, since they read like the questions people ask.
+    text Claude reads - stored as plain text and sent to Claude for the passages that match.
+        Has the full formulas, so Claude can give exact answers.
 """
 import io
 import json

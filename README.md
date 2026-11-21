@@ -70,12 +70,12 @@ The first run stores every file and can take a long time. Later runs only handle
 
 On an old or slow computer, loading your files can take hours. A GitHub codespace is a cloud computer that can do it instead.
 1. On the repository's GitHub page, click **Code**, then **Codespaces**, then **Create codespace on main**. It opens in your browser and looks like VS Code.
-2. Drag `.env`, `credentials.json` and `token.json` from your computer into its file list. These files hold your keys and sign-in, so they're never put on GitHub.
+2. Drag `.env`, `credentials.json` and `token.json` from your computer into its file list.
 3. In its terminal, run `pip install -r requirements.txt`, then `python ingest.py`.
 
 To return to it later, go to github.com/codespaces. It keeps your files and libraries. It doesn't pick up code changes by itself, so run `git pull` there after you push changes.
 
-Saved formula descriptions (`formula_descriptions.json`) stay on whichever computer loads the files. If you switch computers, copy that file over, or the formulas are described again at full cost.
+Saved formula descriptions (`formula_descriptions.json`) stay on whichever computer loads the files. If you switch computers, copy that file over to avoid the costs of having Claude describe the formulas again.
 
 ## Ask questions
 
@@ -95,7 +95,7 @@ Or, to ask questions in the terminal instead, run `python chat.py`.
 - Files in `Tax/Tax <year>` folders before 2025 are skipped (`EARLIEST_TAX_YEAR` in `ingest.py`). Admittedly, this is very specific to the author's own use case. It keeps answers about taxes limited to recent years, so they're accurate, and it saves the tokens needed for Claude to generate formula descriptions for old tax spreadsheets.
 - Not read: Word, Excel, CSV, scanned PDFs, images, audio and video.
 
-Claude sees only the 8 best-matching passages for each question, never a whole file.
+To keep Claude API costs down, the chatbot only sends the best-matching passages to Claude. The number of passages is set by  PASSAGES_PER_QUESTION in chat.py.
 
 ### Optional: plain-English formula descriptions
 
@@ -103,7 +103,7 @@ Without this, the assistant sees each formula only as raw text, like `=SUMIFS(D:
 
 It costs a few cents per spreadsheet, and only new or changed formulas are described again.
 
-List the spreadsheets in `DESCRIBE_FORMULAS_IN` in `.env`, separated by `|` (commas are common in file names, so they aren't used):
+List the spreadsheets in `DESCRIBE_FORMULAS_IN` in `.env`, separated by `|`:
 
 ```
 DESCRIBE_FORMULAS_IN=Budget 2026|Smith, J. payroll|Mileage log

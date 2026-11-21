@@ -1,18 +1,9 @@
-import os
-
 import anthropic
-from dotenv import load_dotenv
 from flask import Flask, Response, request, send_file, stream_with_context
-from pinecone import Pinecone
-from sentence_transformers import SentenceTransformer
 
-from chat import ask_claude, find_passages
-from settings import EMBEDDING_MODEL, PINECONE_INDEX
+from chat import ask_claude, connect, find_passages
 
-load_dotenv()
-model = SentenceTransformer(EMBEDDING_MODEL)
-index = Pinecone(api_key=os.environ["PINECONE_API_KEY"]).Index(PINECONE_INDEX)
-client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+model, index, client = connect()
 
 app = Flask(__name__)
 

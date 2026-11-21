@@ -1,0 +1,5 @@
+[
+  {"question": "How is my quarterly tax payment worked out?", "expected_file": "Income Tax"},
+  {"question": "What did I pay for car insurance in 2025?", "expected_file": "Budget 2025"},
+  {"question": "How many miles did I drive for work in March 2025?", "expected_file": "Mileage log"}
+]

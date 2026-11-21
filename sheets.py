@@ -118,7 +118,7 @@ def relative_form(formula, row, col):
 def same_order_range(match):
     """Put a rewritten range's ends in a fixed order.
 
-    When Google Sheets copies a range like $F2:F$3 down one row, it writes it as $F$3:F4: the same
+    When Google Sheets copies a range like $F2:F$3 down two rows, it writes it as $F$3:F4: the same
     range, but the $ signs move between the two ends. Sorting the column ends and the row ends
     separately makes both versions come out the same.
     """

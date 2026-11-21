@@ -4,13 +4,12 @@ import re
 import sys
 
 import anthropic
-from dotenv import load_dotenv
 from pinecone import Pinecone, ServerlessSpec
 from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
 
 from drive import get_drive, get_sheets, list_my_files
-from settings import DEFAULT_EMBEDDING_MODEL, EMBEDDING_MODEL, PINECONE_INDEX as INDEX_NAME
+from settings import DEFAULT_EMBEDDING_MODEL, EMBEDDING_MODEL, IGNORE_FOLDERS, PINECONE_INDEX
 from sheets import sheet_passages
 
 CHUNK_SIZE = 1000  # characters per passage, roughly a few paragraphs
@@ -21,22 +20,15 @@ CHUNK_SIZE = 1000  # characters per passage, roughly a few paragraphs
 #    File names include their folder path, and tax files have a "year".
 PASSAGE_FORMAT = 3
 
-# Files in a subfolder of Tax named for a year before this one (like "Tax/Tax 2021") are skipped.
-EARLIEST_TAX_YEAR = 2025
-
 GOOGLE_DOC = "application/vnd.google-apps.document"
 GOOGLE_SHEET = "application/vnd.google-apps.spreadsheet"
 PDF = "application/pdf"
 TEXT = "text/plain"
 
 
-def tax_year(file):
-    """The year of the Tax subfolder a file is in, like 2021 for "Tax/Tax 2021/W2.pdf". 0 if none."""
-    parts = file["folder"].split("/")
-    if len(parts) < 2 or parts[0] != "Tax":
-        return 0
-    match = re.search(r"(?<!\d)(?:19|20)\d\d(?!\d)", parts[1])
-    return int(match.group()) if match else 0
+def ignored(file):
+    """True if the file is in one of the IGNORE_FOLDERS, or in a subfolder of one."""
+    return any(file["folder"] == f or file["folder"].startswith(f + "/") for f in IGNORE_FOLDERS)
 
 
 def full_name(file):
@@ -101,17 +93,17 @@ def get_index(pc, dimension):
     If the index was made for a different embedding model (vectors of a different size), it's
     deleted and made again, and every file is stored again.
     """
-    if pc.has_index(INDEX_NAME) and pc.describe_index(INDEX_NAME).dimension != dimension:
-        print(f"The embedding model changed: deleting the Pinecone index '{INDEX_NAME}' to make it again")
-        pc.delete_index(INDEX_NAME)
-    if not pc.has_index(INDEX_NAME):
+    if pc.has_index(PINECONE_INDEX) and pc.describe_index(PINECONE_INDEX).dimension != dimension:
+        print(f"The embedding model changed: deleting the Pinecone index '{PINECONE_INDEX}' to make it again")
+        pc.delete_index(PINECONE_INDEX)
+    if not pc.has_index(PINECONE_INDEX):
         pc.create_index(
-            name=INDEX_NAME,
+            name=PINECONE_INDEX,
             dimension=dimension,
             metric="cosine",
             spec=ServerlessSpec(cloud="aws", region="us-east-1"),
         )
-    return pc.Index(INDEX_NAME)
+    return pc.Index(PINECONE_INDEX)
 
 
 def remove_deleted_files(index, current_file_ids):
@@ -129,7 +121,6 @@ def main():
     # Optional: "python ingest.py 5" only does the first 5 files, for testing.
     limit = int(sys.argv[1]) if len(sys.argv) > 1 else None
 
-    load_dotenv()
     drive = get_drive()
     sheets = get_sheets()
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])  # describes formulas in a few Sheets
@@ -138,9 +129,9 @@ def main():
     index = get_index(pc, model.get_embedding_dimension())
 
     files = [f for f in list_my_files(drive) if f["mimeType"] in (GOOGLE_DOC, GOOGLE_SHEET, PDF, TEXT)]
-    old_tax = [f for f in files if 0 < tax_year(f) < EARLIEST_TAX_YEAR]
-    files = [f for f in files if f not in old_tax][:limit]
-    print(f"{len(files)} files to process ({len(old_tax)} skipped in Tax folders before {EARLIEST_TAX_YEAR})")
+    in_ignored = [f for f in files if ignored(f)]
+    files = [f for f in files if f not in in_ignored][:limit]
+    print(f"{len(files)} files to process" + (f" ({len(in_ignored)} skipped in IGNORE_FOLDERS)" if in_ignored else ""))
 
     if limit is None:
         remove_deleted_files(index, {f["id"] for f in files})
@@ -175,7 +166,6 @@ def main():
                 "metadata": {
                     "file_name": full_name(file),
                     "file_id": file["id"],
-                    "year": tax_year(file),  # 0 unless the file is in a Tax subfolder for a year
                     "modified": file["modifiedTime"],
                     "format": PASSAGE_FORMAT,
                     "embedding_model": EMBEDDING_MODEL,

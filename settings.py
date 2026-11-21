@@ -25,6 +25,18 @@ DESCRIBE_PRICES = tuple(float(p) for p in setting("DESCRIBE_PRICES", "4,20").spl
 # Spreadsheets whose formulas are described, separated by | since file names often have commas.
 DESCRIBE_FORMULAS_IN = [n.strip() for n in setting("DESCRIBE_FORMULAS_IN", "").split("|") if n.strip()]
 
+# Folders whose files (including ones in their subfolders) are never loaded, separated by |.
+# Each is a path from My Drive, like "Old stuff" or "Work/Archive".
+IGNORE_FOLDERS = [n.strip().strip("/") for n in setting("IGNORE_FOLDERS", "").split("|") if n.strip()]
+
+# Folders where answers must come from the right year, separated by |, as paths from My Drive like "Tax".
+# When a question mentions a year, passages from files in these folders (or their subfolders) whose path
+# only has other years are left out, instead of just moved down.
+STRICT_YEAR_FOLDERS = [n.strip().strip("/") for n in setting("STRICT_YEAR_FOLDERS", "").split("|") if n.strip()]
+
+# A year from 1900 to 2099 that isn't part of a longer number.
+YEAR_PATTERN = r"(?<!\d)(?:19|20)\d\d(?!\d)"
+
 # Embedding model, from Hugging Face. Passages stored with a different model are stored again.
 DEFAULT_EMBEDDING_MODEL = "BAAI/bge-base-en-v1.5"
 EMBEDDING_MODEL = setting("EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL)

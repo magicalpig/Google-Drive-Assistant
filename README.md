@@ -92,8 +92,10 @@ Or, to ask questions in the terminal instead, run `python chat.py`.
 - Google Docs, Google Sheets (cells, formulas, named ranges and named functions), PDFs with text, and .txt files.
 - Only files you own. Files shared with you, including ones in shared drives, are left out.
 - Files in the trash are left out.
-- Files in `Tax/Tax <year>` folders before 2025 are skipped (`EARLIEST_TAX_YEAR` in `ingest.py`). Admittedly, this is very specific to the author's own use case. It keeps answers about taxes limited to recent years, so they're accurate, and it saves the tokens needed for Claude to generate formula descriptions for old tax spreadsheets.
+- Optional: list folders to leave out in `IGNORE_FOLDERS` in `.env`, separated by `|`, as paths from My Drive like `Work/Archive` or `Tax/Tax 2023`. Their subfolders are left out too. Leaving out old years also saves the cost of describing their spreadsheets' formulas.
 - Not read: Word, Excel, CSV, scanned PDFs, images, audio and video.
+
+When a question mentions a year, like "my 2025 refund" or "last year" (counted from today), passages from files whose folder path or name has that year are moved up, and ones with other years are moved down (re-ranking). Nothing is left out entirely, except in folders listed in `STRICT_YEAR_FOLDERS` in `.env` (like `STRICT_YEAR_FOLDERS=Tax`): there, files with only other years are left out.
 
 To keep Claude API costs down, the chatbot only sends the best-matching passages to Claude. The number of passages is set by  PASSAGES_PER_QUESTION in chat.py.
 
@@ -114,6 +116,30 @@ DESCRIBE_FORMULAS_IN=Budget 2026|Smith, J. payroll|Mileage log
 - Names must match exactly, including capitals. Spaces around each name are ignored.
 - A file name that contains `|` can't be listed.
 - Leave it empty to describe none.
+
+## Run the tests
+
+```
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+The tests in `tests/` check the code that turns spreadsheets into passages, splits text, skips folders and re-ranks search results by year. They use made-up data, so they don't need your Drive, Pinecone or Claude.
+
+## Measure search quality
+
+`eval.py` checks whether the search finds the right files for questions you write.
+
+1. Copy `eval_questions.example.json` to `eval_questions.json`.
+2. For each question, set `expected_file` to the file that holds the answer. Part of the file's name is enough.
+3. Run `python eval.py`.
+
+For each question, it prints where that file's first passage came in the results, or `missed`. Then it prints two totals:
+
+- **Hit rate:** the share of questions whose file was found.
+- **Mean reciprocal rank (MRR):** the average of 1 / position. A value of 1.0 means the file always came first.
+
+Only the search runs, so this uses no Claude API credits. Run it before and after a change (like a new embedding model) to see whether the change helped. `eval_questions.json` is kept out of git, because questions about your files can be private.
 
 ## When something stops working
 

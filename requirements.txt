@@ -1,11 +1,11 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
-torch
-sentence-transformers
-anthropic
-pinecone
-python-dotenv
-google-api-python-client
-google-auth-oauthlib
-pypdf
-fonttools
-flask
+torch==2.15.0
+sentence-transformers==6.3.0
+anthropic==2.11.0
+pinecone==10.3.0
+python-dotenv==1.2.4
+google-api-python-client==2.202.0
+google-auth-oauthlib==1.5.0
+pypdf==7.1.1
+fonttools==4.68.0
+flask==3.1.3

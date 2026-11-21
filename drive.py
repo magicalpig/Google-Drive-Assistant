@@ -1,4 +1,5 @@
 import os
+from urllib.parse import parse_qs, urlparse
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -6,6 +7,24 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+
+
+def sign_in_by_pasting(flow):
+    """Sign in from a codespace, where Google's redirect to localhost can't reach this script.
+
+    After signing in, the browser fails to load a localhost address. That address holds a sign-in
+    code, so the user pastes it here.
+    """
+    flow.redirect_uri = "http://localhost"
+    url, _ = flow.authorization_url(prompt="consent")
+    print(f"Open this link and sign in:\n\n{url}\n")
+    print("Your browser will then show an error page. That's expected.")
+    pasted = input("Copy that page's full address (starting with http://localhost) and paste it here: ")
+    codes = parse_qs(urlparse(pasted.strip()).query).get("code")
+    if not codes:
+        raise SystemExit("That address has no sign-in code in it. Run python drive.py again.")
+    flow.fetch_token(code=codes[0])
+    return flow.credentials
 
 
 def get_creds():
@@ -18,7 +37,7 @@ def get_creds():
             creds.refresh(Request())
         else:
             flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
-            creds = flow.run_local_server(port=0)
+            creds = sign_in_by_pasting(flow) if os.environ.get("CODESPACES") else flow.run_local_server(port=0)
         with open("token.json", "w") as f:
             f.write(creds.to_json())
     return creds

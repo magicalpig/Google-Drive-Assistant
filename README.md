@@ -117,6 +117,6 @@ DESCRIBE_FORMULAS_IN=Budget 2026|Smith, J. payroll|Mileage log
 
 ## When something stops working
 
-- **`invalid_grant` error:** Google ends the sign-in after 7 days while the Google Cloud app is in Testing. Delete `token.json`, run `python drive.py` again. If you use a codespace, copy the new `token.json` to it.
+- **`invalid_grant` error:** Google ends the sign-in after 7 days while the Google Cloud app is in Testing. Delete `token.json`, run `python drive.py` again. In a codespace, `drive.py` prints a sign-in link instead of opening your browser. After signing in, paste the address of the error page your browser shows into the terminal.
 - **"Your credit balance is too low":** buy more credits in the Anthropic Console.
 - **Codespace won't start:** the free 60 hours for the month may be used up. Check github.com/settings/billing/usage.
